@@ -45,7 +45,7 @@ const CurrencyConverter = () => {
     } catch (err) {
       setError('Failed to fetch currencies. Please check your internet connection.');
     }
-  }, [apiKey]);
+  }, [apiKey, timer]);
 
   // Fetch latest rates (EUR base for free plan)
   const fetchRates = useCallback(async () => {
