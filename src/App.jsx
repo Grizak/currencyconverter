@@ -11,7 +11,7 @@ const CurrencyConverter = () => {
   const [rates, setRates] = useState({});
   const [lastUpdate, setLastUpdate] = useState(null);
   const [error, setError] = useState('');
-  const [timer, setTimer] = useState(falses)
+  const [timer, setTimer] = useState(false)
 
   // Load API key from memory on component mount
   useEffect(() => {
