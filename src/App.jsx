@@ -446,7 +446,7 @@ const CurrencyConverter = () => {
       <div style={styles.card} className="currency-card">
         <div style={styles.header}>
           <h1 style={styles.title}>💱</h1>
-          <h2 style={styles.subtitle}>Currency Converter</h2>
+          <h2 style={styles.subtitle}>Convertica</h2>
           <p style={styles.badge}>Free plan friendly</p>
         </div>
 
