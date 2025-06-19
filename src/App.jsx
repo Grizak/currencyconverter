@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 const CurrencyConverter = () => {
   const [apiKey, setApiKey] = useState('');
@@ -11,54 +11,55 @@ const CurrencyConverter = () => {
   const [rates, setRates] = useState({});
   const [lastUpdate, setLastUpdate] = useState(null);
   const [error, setError] = useState('');
-  const [timer, setTimer] = useState(false)
+  const [apiKeyVisible, setApiKeyVisible] = useState(false);
 
-  // Load API key from memory on component mount
-  useEffect(() => {
-    const savedApiKey = localStorage.getItem('fixerApiKey');
-    if (savedApiKey) {
-      setApiKey(savedApiKey);
-    }
-  }, []);
+  const apiInputRef = useRef();
+  const timerRef = useRef();
 
-  // Save API key to memory when it changes
   useEffect(() => {
     if (apiKey) {
-      localStorage.setItem('fixerApiKey', apiKey);
+      localStorage.setItem("apiKey", apiKey);
     }
-  }, [apiKey]);
+  }, [apiKey])
+
+  useEffect(() => {
+    const apikey = localStorage.getItem("apiKey");
+    if (apikey) {
+      setApiKey(apikey)
+    }
+  }, [])
 
   // Fetch available currencies
   const fetchCurrencies = useCallback(async () => {
-    if (!apiKey) return
+    if (!apiKey.trim()) return;
 
     try {
+      setError('');
       const response = await fetch(`https://data.fixer.io/api/symbols?access_key=${apiKey}`);
       const data = await response.json();
       
       if (data.success) {
         setCurrencies(data.symbols);
-        setError('');
       } else {
         setError(getErrorMessage(data.error));
       }
     } catch (err) {
       setError('Failed to fetch currencies. Please check your internet connection.');
     }
-  }, [apiKey, timer]);
+  }, [apiKey]);
 
   // Fetch latest rates (EUR base for free plan)
   const fetchRates = useCallback(async () => {
-    if (!apiKey) return;
+    if (!apiKey.trim()) return;
 
     try {
+      setError('');
       const response = await fetch(`https://data.fixer.io/api/latest?access_key=${apiKey}`);
       const data = await response.json();
       
       if (data.success) {
         setRates(data.rates);
         setLastUpdate(new Date().toLocaleTimeString());
-        setError('');
       } else {
         setError(getErrorMessage(data.error));
       }
@@ -69,46 +70,63 @@ const CurrencyConverter = () => {
 
   // Load currencies and rates when API key is provided
   useEffect(() => {
-    if (apiKey) {
+    if (apiKey.trim()) {
       fetchCurrencies();
       fetchRates();
     }
   }, [apiKey, fetchCurrencies, fetchRates]);
 
+  // Auto-refresh rates every 10 minutes
+  useEffect(() => {
+    if (apiKey.trim() && Object.keys(rates).length > 0) {
+      timerRef.current = setInterval(() => {
+        fetchRates();
+      }, 10 * 60 * 1000); // 10 minutes
+
+      return () => {
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+        }
+      };
+    }
+  }, [apiKey, rates, fetchRates]);
+
   const getErrorMessage = (error) => {
     if (!error) return 'Unknown error occurred';
     
-    switch (error.code) {
-      case 101:
-        return 'Invalid API key. Please check your API key.';
-      case 102:
-        return 'Account inactive or suspended.';
-      case 103:
-        return 'This endpoint requires a paid plan. Using free plan workaround.';
-      case 104:
-        return 'Monthly usage limit exceeded. Try again next month.';
-      case 105:
-        return 'Current usage limit exceeded.';
-      case 201:
-        return 'Invalid source currency.';
-      case 202:
-        return 'Invalid target currency.';
-      default:
-        return error.info || 'An error occurred';
+    const errorMessages = {
+      101: 'Invalid API key. Please check your API key.',
+      102: 'Account inactive or suspended.',
+      103: 'This endpoint requires a paid plan. Using free plan workaround.',
+      104: 'Monthly usage limit exceeded. Try again next month.',
+      105: 'Current usage limit exceeded.',
+      201: 'Invalid source currency.',
+      202: 'Invalid target currency.'
+    };
+
+    return errorMessages[error.code] || error.info || 'An error occurred';
+  };
+
+  // Validate inputs
+  const validateInputs = () => {
+    if (!apiKey.trim()) {
+      return 'Please enter your API key';
     }
+    if (!amount || amount <= 0) {
+      return 'Please enter a valid amount greater than 0';
+    }
+    if (amount > 1000000) {
+      return 'Amount too large. Please enter a smaller value.';
+    }
+    return null;
   };
 
   // Convert currency using EUR as base (free plan workaround)
-  const convertCurrency = () => {
-    if (!apiKey.trim()) {
-      setResult('Please enter your API key');
-      setError('API key required');
-      return;
-    }
-
-    if (!amount || amount <= 0) {
-      setResult('Please enter a valid amount');
-      setError('Invalid amount');
+  const convertCurrency = useCallback(() => {
+    const validationError = validateInputs();
+    if (validationError) {
+      setResult('');
+      setError(validationError);
       return;
     }
 
@@ -141,7 +159,6 @@ const CurrencyConverter = () => {
         convertedAmount = amount * exchangeRate;
       } else {
         // Converting between two non-EUR currencies
-        // First convert to EUR, then to target currency
         const toEurRate = 1 / rates[fromCurrency];
         const fromEurRate = rates[toCurrency];
         exchangeRate = toEurRate * fromEurRate;
@@ -152,29 +169,23 @@ const CurrencyConverter = () => {
         throw new Error('Invalid conversion result');
       }
 
-      setResult(`${amount.toFixed(2)} ${fromCurrency} = ${convertedAmount.toFixed(2)} ${toCurrency}`);
-      
-      // Show exchange rate
+      const formattedResult = `${amount.toFixed(2)} ${fromCurrency} = ${convertedAmount.toFixed(2)} ${toCurrency}`;
       const rateText = `Exchange rate: 1 ${fromCurrency} = ${exchangeRate.toFixed(6)} ${toCurrency}`;
-      setError(''); // Clear any previous errors
       
-      // Update result with rate info
-      setTimeout(() => {
-        setResult(prev => prev + `\n${rateText}`);
-      }, 100);
+      setResult(`${formattedResult}\n${rateText}`);
+      setError('');
 
     } catch (err) {
-      setResult('Conversion failed');
+      setResult('');
       setError('Unable to calculate conversion. Please try again.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [amount, fromCurrency, toCurrency, rates, apiKey]);
 
   const swapCurrencies = () => {
-    const temp = fromCurrency;
     setFromCurrency(toCurrency);
-    setToCurrency(temp);
+    setToCurrency(fromCurrency);
   };
 
   const handleKeyPress = (e) => {
@@ -183,13 +194,17 @@ const CurrencyConverter = () => {
     }
   };
 
-  // Auto-convert when amount changes (with delay)
+  const toggleApiKeyVisibility = () => {
+    setApiKeyVisible(!apiKeyVisible);
+  };
+
+  // Auto-convert when inputs change (with debounce)
   useEffect(() => {
-    if (apiKey && Object.keys(rates).length > 0 && amount > 0) {
+    if (apiKey.trim() && Object.keys(rates).length > 0 && amount > 0) {
       const timeoutId = setTimeout(convertCurrency, 500);
       return () => clearTimeout(timeoutId);
     }
-  }, [amount, fromCurrency, toCurrency, rates, apiKey]);
+  }, [amount, fromCurrency, toCurrency, convertCurrency]);
 
   const styles = {
     container: {
@@ -237,6 +252,11 @@ const CurrencyConverter = () => {
       borderRadius: '12px',
       borderLeft: '4px solid #3b82f6'
     },
+    apiInputContainer: {
+      position: 'relative',
+      display: 'flex',
+      alignItems: 'center'
+    },
     label: {
       display: 'block',
       fontSize: '0.875rem',
@@ -253,10 +273,17 @@ const CurrencyConverter = () => {
       transition: 'border-color 0.2s ease',
       boxSizing: 'border-box'
     },
-    inputFocus: {
-      outline: 'none',
-      borderColor: '#3b82f6',
-      boxShadow: '0 0 0 3px rgba(59, 130, 246, 0.1)'
+    toggleButton: {
+      position: 'absolute',
+      right: '8px',
+      background: 'none',
+      border: 'none',
+      color: '#6b7280',
+      cursor: 'pointer',
+      fontSize: '12px',
+      padding: '4px 8px',
+      borderRadius: '4px',
+      zIndex: 1
     },
     helpText: {
       fontSize: '0.75rem',
@@ -381,13 +408,6 @@ const CurrencyConverter = () => {
     }
   };
 
-  useEffect(() => {
-    const reloadTimer = setTimeout(() => {
-      setTimer(!timer)
-    }, 1000*60*10) // 10min
-    return clearTimeout(reloadTimer)
-  }, [timer])
-
   return (
     <div style={styles.container}>
       <style>
@@ -416,6 +436,10 @@ const CurrencyConverter = () => {
             border-color: #3b82f6;
             box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
           }
+
+          .toggle-btn:hover {
+            background: #f3f4f6;
+          }
         `}
       </style>
       
@@ -431,16 +455,27 @@ const CurrencyConverter = () => {
           <label style={styles.label}>
             Fixer.io API Key:
           </label>
-          <input
-            type="text"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            onKeyDown={handleKeyPress}
-            placeholder="Enter your free API key"
-            style={styles.input}
-          />
+          <div style={styles.apiInputContainer}>
+            <input
+              ref={apiInputRef}
+              type={apiKeyVisible ? "text" : "password"}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              onKeyDown={handleKeyPress}
+              placeholder="Enter your free API key"
+              style={{...styles.input, paddingRight: '60px'}}
+            />
+            <button 
+              onClick={toggleApiKeyVisibility}
+              style={styles.toggleButton}
+              className="toggle-btn"
+              type="button"
+            >
+              {apiKeyVisible ? 'Hide' : 'Show'}
+            </button>
+          </div>
           <p style={styles.helpText}>
-            Get your free API key at <a href="https://fixer.io" target='_blank'>fixer.io</a> (100 requests/month)
+            Get your free API key at <a href="https://fixer.io" target="_blank" rel="noopener noreferrer">fixer.io</a> (100 requests/month)
           </p>
         </div>
 
@@ -456,6 +491,7 @@ const CurrencyConverter = () => {
             onKeyPress={handleKeyPress}
             placeholder="Enter amount"
             min="0"
+            max="1000000"
             step="0.01"
             style={{...styles.input, fontSize: '1.125rem'}}
           />
@@ -484,6 +520,10 @@ const CurrencyConverter = () => {
                   <option value="JPY">JPY - Japanese Yen</option>
                   <option value="CAD">CAD - Canadian Dollar</option>
                   <option value="AUD">AUD - Australian Dollar</option>
+                  <option value="CHF">CHF - Swiss Franc</option>
+                  <option value="CNY">CNY - Chinese Yuan</option>
+                  <option value="SEK">SEK - Swedish Krona</option>
+                  <option value="NOK">NOK - Norwegian Krone</option>
                 </>
               )}
             </select>
@@ -494,6 +534,7 @@ const CurrencyConverter = () => {
             style={styles.swapButton}
             className="swap-btn"
             title="Swap currencies"
+            type="button"
           >
             ⇄
           </button>
@@ -519,6 +560,10 @@ const CurrencyConverter = () => {
                   <option value="JPY">JPY - Japanese Yen</option>
                   <option value="CAD">CAD - Canadian Dollar</option>
                   <option value="AUD">AUD - Australian Dollar</option>
+                  <option value="CHF">CHF - Swiss Franc</option>
+                  <option value="CNY">CNY - Chinese Yuan</option>
+                  <option value="SEK">SEK - Swedish Krona</option>
+                  <option value="NOK">NOK - Norwegian Krone</option>
                 </>
               )}
             </select>
@@ -534,6 +579,7 @@ const CurrencyConverter = () => {
             ...(loading ? styles.convertButtonDisabled : {})
           }}
           className="convert-btn"
+          type="button"
         >
           {loading ? (
             <div style={styles.loading}>
@@ -552,7 +598,7 @@ const CurrencyConverter = () => {
               result ? styles.resultSuccess : 
               styles.resultDefault)
         }}>
-          {error || result || 'Enter your API key and click convert to see results'}
+          {error || result || 'Enter your API key and amount to see conversion results'}
         </div>
 
         {/* Status Info */}
@@ -569,11 +615,12 @@ const CurrencyConverter = () => {
         {/* Free Plan Info */}
         <div style={styles.infoBox}>
           <p style={styles.infoText}>
-            <strong>💡 Free Plan Tips:</strong><br/>
+            <strong>💡 Free Plan Features:</strong><br/>
             • 100 requests/month limit<br/>
-            • EUR base currency only<br/>
-            • Smart conversion between any currencies<br/>
-            • All currencies fetched automatically
+            • EUR base currency conversion<br/>
+            • Real-time exchange rates<br/>
+            • Auto-refresh every 10 minutes<br/>
+            • Support for 150+ currencies
           </p>
         </div>
       </div>
